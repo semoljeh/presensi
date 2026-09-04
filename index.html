@@ -76,28 +76,27 @@
         <h2 id="teksLoading" class="text-sm sm:text-xl font-bold text-gray-800 font-heading text-center w-full max-w-xs sm:max-w-md leading-relaxed">Memuat Data...</h2>
     </div>
 
-    <div class="max-w-5xl mx-auto">
+ <div class="max-w-5xl mx-auto">
         <!-- HEADER -->
         <div class="bg-white p-3 sm:p-5 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between gap-3 mb-5 sm:mb-6">
             <div class="flex items-center gap-3 sm:gap-4 overflow-hidden">
                 <div class="w-10 h-10 sm:w-14 sm:h-14 bg-emerald-50 rounded-full flex items-center justify-center shrink-0 border border-emerald-100 overflow-hidden p-1">
-                    <img src="../asset/logo.png" alt="Logo" class="w-full h-full object-contain" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                    <!-- Tanda ../ pada src gambar dihapus -->
+                    <img src="asset/logo.png" alt="Logo" class="w-full h-full object-contain" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
                     <i class="fas fa-mosque text-xl sm:text-2xl text-emerald-600 hidden"></i>
                 </div>
                 <div class="flex-1 min-w-0">
-                    <h1 class="text-base sm:text-xl font-heading font-bold text-gray-800 truncate leading-tight">Absensi Digital</h1>
+                    <!-- Menyesuaikan kata Absensi menjadi Presensi -->
+                    <h1 class="text-base sm:text-xl font-heading font-bold text-gray-800 truncate leading-tight">Presensi Digital</h1>
                     <p class="text-[10px] sm:text-sm text-gray-500 mt-0.5 truncate flex items-center gap-2">
                         Madrasah Diniyah Darussalam
                         <span id="badgeStatus" class="px-2 py-0.5 rounded text-[9px] font-bold bg-gray-200 text-gray-600"><i class="fas fa-sync fa-spin"></i> Cek Status...</span>
                     </p>
                 </div>
             </div>
-            <button onclick="window.location.href='../index.html'" class="w-10 h-10 sm:w-12 sm:h-12 shrink-0 flex items-center justify-center bg-gray-100 text-gray-600 rounded-xl hover:bg-emerald-100 hover:text-emerald-700 transition-all shadow-sm" title="Kembali ke Beranda">
-                <i class="fas fa-arrow-left sm:text-lg"></i>
-            </button>
         </div>
 
-<!-- 2 TAB MENU -->
+        <!-- 2 TAB MENU -->
         <div class="grid grid-cols-2 gap-1 sm:gap-2 mb-6 bg-white p-1.5 sm:p-2 rounded-2xl shadow-sm border border-gray-100">
             <!-- Tombol Manual (Kiri - AKTIF DEFAULT) -->
             <button onclick="switchTab('manual')" id="tabManual" class="flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 py-2 sm:py-3 bg-emerald-600 text-white rounded-xl font-bold text-[10px] sm:text-sm transition-all shadow-sm">
