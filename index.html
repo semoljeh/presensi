@@ -225,6 +225,7 @@
         let JAM_BUKA = 0; 
         let JAM_TUTUP = 24; 
         let STATUS_SISTEM = 'Buka';
+		let LIBUR_JUMAT = 'Aktif';
 
         function showLoading(show, teks="Memproses...") { 
             document.getElementById('loadingScreen').style.display = show ? 'flex' : 'none'; 
@@ -244,10 +245,11 @@
          fetch(GAS_URL, { method: 'POST', body: fdStatus })
             .then(r=>r.json())
             .then(res => {
-                if (res.status === 'success') {
+               if (res.status === 'success') {
                     STATUS_SISTEM = res.status_absen;
                     if(res.jam_buka !== undefined) JAM_BUKA = parseInt(res.jam_buka);
                     if(res.jam_tutup !== undefined) JAM_TUTUP = parseInt(res.jam_tutup);
+                    if(res.libur_jumat !== undefined) LIBUR_JUMAT = res.libur_jumat; // <--- TAMBAHKAN BARIS INI
                     renderBadgeStatus(STATUS_SISTEM);
                 }
                 ambilDataSantri();
@@ -520,7 +522,7 @@ function switchTab(tab) {
             const hari = waktu.getDay();
             const jam = waktu.getHours(); 
 
-            if (hari === 5) {
+           if (hari === 5 && LIBUR_JUMAT === 'Aktif') {
                 Swal.fire({ icon: 'info', title: 'Libur Rutin', text: 'Hari ini hari Jum\'at. Sistem absen sedang diliburkan.' });
                 return false;
             }
