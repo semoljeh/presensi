@@ -536,20 +536,33 @@ function switchTab(tab) {
             return true;
         }
 
-        function onScanSuccess(decodedText) {
+function onScanSuccess(decodedText) {
+            // 1. Kunci agar tidak bentrok
             if(isScanning) return; 
+            isScanning = true;
+            
+            // 2. Jeda kamera SEGERA agar tidak spam membaca barcode berulang kali
+            if(html5QrcodeScanner) html5QrcodeScanner.pause(true); 
 
+            // 3. Cek izin absen (Libur / Jam Tutup)
             if (!cekIzinAbsen()) {
-                setTimeout(() => { if(html5QrcodeScanner) html5QrcodeScanner.resume(); }, 3000);
+                // Jika libur, buka kembali kunci kamera setelah 3 detik
+                setTimeout(() => { 
+                    isScanning = false;
+                    if(html5QrcodeScanner) html5QrcodeScanner.resume(); 
+                }, 3000);
                 return; 
             }
 
+            // 4. Cari data santri
             const santri = DATA_SANTRI.find(s => s.nis == decodedText);
-            if (!santri) return; 
+            if (!santri) {
+                // Jika bukan barcode santri, buka kembali kamera
+                isScanning = false;
+                if(html5QrcodeScanner) html5QrcodeScanner.resume();
+                return; 
+            }
 
-            isScanning = true;
-            html5QrcodeScanner.pause(true); 
-            
             if (typeof beepSound !== 'undefined') {
                 beepSound.play().catch(e => console.log("Audio diblokir browser"));
             }
