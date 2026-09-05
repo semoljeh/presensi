@@ -754,9 +754,9 @@ async function simpanSemuaAbsenManual() {
             } else {
                 Swal.fire({ icon: 'success', title: 'Berhasil!', text: `Seluruh data Presensi Kelas ${kelas} berhasil disimpan.` });
             }
-        } else {
-            // Jika res.status error, tampilkan pop-up elegan
-            Swal.fire({ icon: 'error', title: 'Data Sudah Tercatat', text: `Absensi untuk Kelas ${kelas} sepertinya sudah terekam penuh di database hari ini.` });
+      } else {
+            // Menampilkan pesan error asli dari server
+            Swal.fire({ icon: 'error', title: 'Gagal Menyimpan', text: res.message });
         }
     } catch (error) {
         showLoading(false);
