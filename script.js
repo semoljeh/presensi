@@ -1,5 +1,3 @@
-// Pastikan URL ini persis sama dengan GAS_URL yang ada di file config.js/script.js Anda!
-
 // =========================================================
 // WELCOME SCREEN (SAPAAN WALI SANTRI) - TAMPIL SETIAP SAAT
 // =========================================================
@@ -34,6 +32,9 @@ document.addEventListener("DOMContentLoaded", () => {
             }, 50);
         }
     }
+
+    // --- INISIALISASI FITUR AUTO LOGOUT ---
+    inisialisasiAutoLogout();
 });
 
 function tutupWelcomeOrtu() {
@@ -69,155 +70,203 @@ function showLoading(show) {
 function tarikDataDariDatabase() {
     const inputNis = document.getElementById('ortuNis').value.trim();
     const inputTgl = document.getElementById('ortuTglLahir').value;
+    const containerHasil = document.getElementById('hasilDataOrtu');
 
     if (!inputNis || !inputTgl) {
         return Swal.fire('Perhatian', 'Mohon isi Nomor NIS dan pilih Tanggal Lahir terlebih dahulu.', 'warning');
     }
 
-    // SIMPAN NIS & TANGGAL LAHIR KE MEMORI
+    // SIMPAN NIS & TANGGAL LAHIR KE MEMORI BROWSER PERMANEN (LOCALSTORAGE)
     localStorage.setItem('ortuActiveNis', inputNis);
     localStorage.setItem('ortuActiveTgl', inputTgl);
 
-    const cacheKey = 'dashboard_' + inputNis;
-    const cachedData = localStorage.getItem(cacheKey);
+    showLoading(true);
 
-    if (cachedData) {
-        // [1] SWR: Tampilkan seketika dari cache
-        const parsedData = JSON.parse(cachedData);
-        JADWAL_MAPEL = parsedData.mapel || {};
-        renderDashboardOrtu(parsedData);
-        tutupWelcomeOrtu();
-        console.log("Memuat dari cache. Sinkronisasi di latar belakang...");
-    } else {
-        // [2] Login Pertama: Tampilkan loading
-        showLoading(true);
-    }
+    const objekTanggal = new Date(inputTgl);
+    const opsiFormat = { day: 'numeric', month: 'long', year: 'numeric' };
+    const ejaanTglLahir = objekTanggal.toLocaleDateString('id-ID', opsiFormat).toLowerCase();
 
-    // [3] REQUEST TUNGGAL KE SERVER
-    const fd = new URLSearchParams();
-    fd.append('action', 'getDashboardOrtu');
-    fd.append('nis', inputNis);
-    fd.append('tglLahir', inputTgl);
+    const fdSantri = new URLSearchParams(); fdSantri.append('action', 'getSantri');
+    const fdMapel = new URLSearchParams(); fdMapel.append('action', 'getAllMapel');
 
-    fetch(GAS_URL, { method: 'POST', body: fd })
-    .then(r => r.json())
-    .then(response => {
-        showLoading(false);
-        if (response.status === 'success') {
-            // Update cache dengan data terbaru
-            localStorage.setItem(cacheKey, JSON.stringify(response.data));
-            JADWAL_MAPEL = response.data.mapel || {};
-            
-            // Render ulang dengan data segar secara halus
-            renderDashboardOrtu(response.data);
-            if (!cachedData) tutupWelcomeOrtu();
-            
-        } else {
-             if (!cachedData) {
-                hapusSesiLokal();
-                Swal.fire('Data Tidak Cocok', response.message || 'NIS atau Tanggal Lahir salah.', 'error');
-             }
+   Promise.all([
+        fetch(GAS_URL, { method: 'POST', body: fdSantri }).then(r => r.json()),
+        fetch(GAS_URL, { method: 'POST', body: fdMapel }).then(r => r.json())
+    ])
+    .then(([responseSantri, responseMapel]) => {
+        // --- KODE DEBUGGING BARU ---
+        console.log("Respon API Mapel:", responseMapel);
+        console.log("Respon API Santri:", responseSantri);
+        // ---------------------------
+
+        if (responseMapel.status === 'success') JADWAL_MAPEL = responseMapel.data;
+        
+        if (responseSantri.status !== 'success') {
+          console.error("Detail Error API Santri:", JSON.stringify(responseSantri, null, 2));
+            throw new Error("Gagal mengambil master data.");
         }
-    })
+
+        const santriTerpilih = responseSantri.data.find(s => s.nis.toString() === inputNis && s.ttl.toLowerCase().includes(ejaanTglLahir));
+
+        if (!santriTerpilih) {
+            showLoading(false);
+            if (containerHasil) containerHasil.classList.add('hidden');
+            
+            // Hapus memori jika ternyata datanya salah agar tidak nyangkut saat di-refresh
+            localStorage.removeItem('ortuActiveNis');
+            localStorage.removeItem('ortuActiveTgl');
+            
+            const panelWelcome = document.getElementById('welcomeOrtu');
+            if (panelWelcome) {
+                panelWelcome.style.display = 'flex';
+                panelWelcome.classList.remove('hidden');
+                setTimeout(() => panelWelcome.classList.remove('opacity-0'), 50);
+            }
+            return Swal.fire('Data Tidak Cocok', 'Nomor NIS atau Tanggal Lahir santri yang Anda masukkan salah.', 'error');
+        }
+
+        document.getElementById('ortuNamaSantri').innerText = santriTerpilih.nama;
+        document.getElementById('ortuNisSantri').innerText = santriTerpilih.nis;
+        document.getElementById('ortuKelasSantri').innerText = santriTerpilih.kelas;
+        
+        document.getElementById('ortuJkSantri').innerText = santriTerpilih.jk ? santriTerpilih.jk : '-';
+        let namaAyah = santriTerpilih.ayah ? santriTerpilih.ayah : '-';
+        let namaIbu = santriTerpilih.ibu ? santriTerpilih.ibu : '-';
+        document.getElementById('ortuNamaOrtu').innerText = namaAyah + " & " + namaIbu;
+        document.getElementById('ortuAlamatSantri').innerText = santriTerpilih.alamat ? santriTerpilih.alamat : '-';
+
+        // --- KODE AUTO FOTO SANTRI UNTUK PORTAL ORTU ---
+        const imgFotoSantri = document.getElementById('ortuFotoSantri');
+        if (imgFotoSantri) {
+            let fotoUrl = santriTerpilih.foto || '';
+            if (fotoUrl && fotoUrl.trim() !== '') {
+                let finalUrl = fotoUrl;
+                if (fotoUrl.includes('drive.google.com')) {
+                    let fileId = '';
+                    if (fotoUrl.includes('id=')) fileId = fotoUrl.split('id=')[1].split('&')[0];
+                    else if (fotoUrl.includes('/d/')) fileId = fotoUrl.split('/d/')[1].split('/')[0];
+                    
+                    // Memakai trik Thumbnail API agar gambar Drive bisa tampil (Bypass CORS)
+                    if (fileId) finalUrl = `https://drive.google.com/thumbnail?id=${fileId}&sz=w500`;
+                }
+                imgFotoSantri.src = finalUrl;
+            } else {
+                // Jika foto tidak ada, otomatis buat inisial dari nama asli santri
+                let inisialNama = encodeURIComponent(santriTerpilih.nama || 'Santri');
+                imgFotoSantri.src = `https://ui-avatars.com/api/?name=${inisialNama}&background=065f46&color=fff`;
+            }
+        }
+        // -----------------------------------------------
+
+        // Panggil SPP
+        muatRiwayatSpp(santriTerpilih.nis);
+
+        const fdNilai = new URLSearchParams();
+        fdNilai.append('action', 'getDataNilai');
+        fdNilai.append('kelas', santriTerpilih.kelas);
+
+        const fdPengaturan = new URLSearchParams();
+        fdPengaturan.append('action', 'getPengaturan');
+        fdPengaturan.append('kelas', santriTerpilih.kelas);
+
+        // KODE BARU: Menarik data absen hari ini
+        const fdAbsenHariIni = new URLSearchParams();
+        fdAbsenHariIni.append('action', 'getAbsenHariIni');
+        fdAbsenHariIni.append('kelas', santriTerpilih.kelas);
+
+        return Promise.all([
+            fetch(GAS_URL, { method: 'POST', body: fdNilai }).then(r => r.json()),
+            fetch(GAS_URL, { method: 'POST', body: fdPengaturan }).then(r => r.json()),
+            fetch(GAS_URL, { method: 'POST', body: fdAbsenHariIni }).then(r => r.json())
+        ])
+        .then(([responseNilai, responsePengaturan, responseAbsenHariIni]) => {
+            showLoading(false);
+            if (responseNilai.status !== 'success') {
+                return Swal.fire('Informasi', 'Data identitas benar, namun nilai kelas belum di-input guru.', 'info');
+            }
+
+            let statusRilis = 'Sembunyi';
+            let detailRapor = {}; 
+
+            if (responsePengaturan.status === 'success') {
+                if (responsePengaturan.umum && responsePengaturan.umum.status_rilis) {
+                    statusRilis = responsePengaturan.umum.status_rilis;
+                }
+                if (responsePengaturan.detail) {
+                    detailRapor = responsePengaturan.detail; 
+                }
+            }
+
+            // KODE BARU: Proses & Tampilkan Status Kehadiran Hari Ini
+            const elStatusHariIni = document.getElementById('ortuStatusHariIni');
+            if (elStatusHariIni) {
+                let statusHariIni = "Belum Absen"; 
+                if (responseAbsenHariIni.status === 'success' && responseAbsenHariIni.data) {
+                    if (responseAbsenHariIni.data[inputNis]) {
+                        statusHariIni = responseAbsenHariIni.data[inputNis];
+                    }
+                }
+                
+                if (statusHariIni === 'Hadir') {
+                    elStatusHariIni.className = "text-[11px] sm:text-xs font-bold px-3 py-1.5 rounded-md bg-emerald-100 text-emerald-700 shadow-sm border border-emerald-200";
+                    elStatusHariIni.innerHTML = '<i class="fas fa-check-circle mr-1"></i> Hadir';
+                } else if (statusHariIni === 'Izin') {
+                    elStatusHariIni.className = "text-[11px] sm:text-xs font-bold px-3 py-1.5 rounded-md bg-amber-100 text-amber-700 shadow-sm border border-amber-200";
+                    elStatusHariIni.innerHTML = '<i class="fas fa-envelope-open mr-1"></i> Izin';
+                } else if (statusHariIni === 'Sakit') {
+                    elStatusHariIni.className = "text-[11px] sm:text-xs font-bold px-3 py-1.5 rounded-md bg-blue-100 text-blue-700 shadow-sm border border-blue-200";
+                    elStatusHariIni.innerHTML = '<i class="fas fa-briefcase-medical mr-1"></i> Sakit';
+                } else if (statusHariIni === 'Alfa' || statusHariIni === 'Alpa') {
+                    elStatusHariIni.className = "text-[11px] sm:text-xs font-bold px-3 py-1.5 rounded-md bg-red-100 text-red-700 shadow-sm border border-red-200";
+                    elStatusHariIni.innerHTML = '<i class="fas fa-times-circle mr-1"></i> Alfa';
+                } else {
+                    elStatusHariIni.className = "text-[11px] sm:text-xs font-bold px-3 py-1.5 rounded-md bg-gray-100 text-gray-500 shadow-sm border border-gray-200";
+                    elStatusHariIni.innerHTML = '<i class="fas fa-minus-circle mr-1"></i> Belum Absen';
+                }
+            }
+
+            // ==========================================
+            // BAGIAN YANG SEMPAT HILANG (RENDER UI PROFIL)
+            // ==========================================
+            prosesDanTampilkanData(inputNis, santriTerpilih.kelas, responseNilai.headers, responseNilai.data, statusRilis, detailRapor);
+            tutupWelcomeOrtu();
+
+            // MUNCULKAN WIDGET WA SETELAH LOGIN BERHASIL (DENGAN TEKS DINAMIS & RAPI)
+            const widgetWA = document.getElementById('wa-widget');
+            const waLink = document.getElementById('wa-link');
+            
+            if (widgetWA && waLink) {
+                const namaSantri = santriTerpilih.nama.trim();
+                const kelasSantri = santriTerpilih.kelas;
+                
+                const pesanDinamis = `Assalamu'alaikum Admin Madrasah Darussalam,\n\nSaya wali santri dari ananda:\n*Nama:* ${namaSantri}\n*Kelas:* ${kelasSantri}\n\nIngin meminta bantuan terkait layanan Portal Wali Santri.`;
+                
+                waLink.href = `https://api.whatsapp.com/send/?phone=6285182262514&text=${encodeURIComponent(pesanDinamis)}&type=phone_number&app_absent=0`;
+                
+                widgetWA.classList.remove('hidden');
+                setTimeout(() => widgetWA.classList.remove('opacity-0'), 100);
+            }
+
+            // MUNCULKAN BANNER PWA SETELAH SEMUA SELESAI
+           // tampilkanPromptPWAOrtu();
+            
+        }); // Penutup Promise.all (Nilai & Pengaturan & Absen)
+        
+    }) // Penutup Promise.all (Santri & Mapel)
     .catch(err => {
         showLoading(false);
-        if (!cachedData) Swal.fire('Koneksi Gagal', 'Gagal memuat informasi database dari server cloud.', 'error');
+        Swal.fire('Koneksi Gagal', 'Gagal memuat informasi database dari server cloud.', 'error');
         console.error(err);
     });
 }
 
-function hapusSesiLokal() {
-    localStorage.removeItem('ortuActiveNis');
-    localStorage.removeItem('ortuActiveTgl');
-    const panelWelcome = document.getElementById('welcomeOrtu');
-    if (panelWelcome) {
-        panelWelcome.style.display = 'flex';
-        panelWelcome.classList.remove('hidden');
-        setTimeout(() => panelWelcome.classList.remove('opacity-0'), 50);
-    }
-}
-
-
-function renderDashboardOrtu(data) {
-    const santriTerpilih = data.profil;
-    const inputNis = santriTerpilih.nis;
-
-    // 1. RENDER IDENTITAS
-    document.getElementById('ortuNamaSantri').innerText = santriTerpilih.nama;
-    document.getElementById('ortuNisSantri').innerText = santriTerpilih.nis;
-    document.getElementById('ortuKelasSantri').innerText = santriTerpilih.kelas;
-    document.getElementById('ortuJkSantri').innerText = santriTerpilih.jk ? santriTerpilih.jk : '-';
-    let namaAyah = santriTerpilih.ayah ? santriTerpilih.ayah : '-';
-    let namaIbu = santriTerpilih.ibu ? santriTerpilih.ibu : '-';
-    document.getElementById('ortuNamaOrtu').innerText = namaAyah + " & " + namaIbu;
-    document.getElementById('ortuAlamatSantri').innerText = santriTerpilih.alamat ? santriTerpilih.alamat : '-';
-
-    const imgFotoSantri = document.getElementById('ortuFotoSantri');
-    if (imgFotoSantri) {
-        let fotoUrl = santriTerpilih.foto || '';
-        if (fotoUrl && fotoUrl.trim() !== '') {
-            let finalUrl = fotoUrl;
-            if (fotoUrl.includes('drive.google.com')) {
-                let fileId = '';
-                if (fotoUrl.includes('id=')) fileId = fotoUrl.split('id=')[1].split('&')[0];
-                else if (fotoUrl.includes('/d/')) fileId = fotoUrl.split('/d/')[1].split('/')[0];
-                if (fileId) finalUrl = `https://drive.google.com/thumbnail?id=${fileId}&sz=w500`;
-            }
-            imgFotoSantri.src = finalUrl;
-        } else {
-            let inisialNama = encodeURIComponent(santriTerpilih.nama || 'Santri');
-            imgFotoSantri.src = `https://ui-avatars.com/api/?name=${inisialNama}&background=065f46&color=fff`;
-        }
-    }
-
-    // 2. RENDER ABSEN HARI INI
-    const elStatusHariIni = document.getElementById('ortuStatusHariIni');
-    if (elStatusHariIni) {
-        let statusHariIni = data.absenHariIni;
-        if (statusHariIni === 'Hadir') {
-            elStatusHariIni.className = "text-[11px] sm:text-xs font-bold px-3 py-1.5 rounded-md bg-emerald-100 text-emerald-700 shadow-sm border border-emerald-200";
-            elStatusHariIni.innerHTML = '<i class="fas fa-check-circle mr-1"></i> Hadir';
-        } else if (statusHariIni === 'Izin') {
-            elStatusHariIni.className = "text-[11px] sm:text-xs font-bold px-3 py-1.5 rounded-md bg-amber-100 text-amber-700 shadow-sm border border-amber-200";
-            elStatusHariIni.innerHTML = '<i class="fas fa-envelope-open mr-1"></i> Izin';
-        } else if (statusHariIni === 'Sakit') {
-            elStatusHariIni.className = "text-[11px] sm:text-xs font-bold px-3 py-1.5 rounded-md bg-blue-100 text-blue-700 shadow-sm border border-blue-200";
-            elStatusHariIni.innerHTML = '<i class="fas fa-briefcase-medical mr-1"></i> Sakit';
-        } else if (statusHariIni === 'Alfa' || statusHariIni === 'Alpa') {
-            elStatusHariIni.className = "text-[11px] sm:text-xs font-bold px-3 py-1.5 rounded-md bg-red-100 text-red-700 shadow-sm border border-red-200";
-            elStatusHariIni.innerHTML = '<i class="fas fa-times-circle mr-1"></i> Alfa';
-        } else {
-            elStatusHariIni.className = "text-[11px] sm:text-xs font-bold px-3 py-1.5 rounded-md bg-gray-100 text-gray-500 shadow-sm border border-gray-200";
-            elStatusHariIni.innerHTML = '<i class="fas fa-minus-circle mr-1"></i> Belum Absen';
-        }
-    }
-
-    // 3. RENDER SPP LANGSUNG (TANPA FETCH BARU)
-    renderSppDariData(data.spp, data.sppSetting);
-
-    // 4. RENDER PROFIL & NILAI
-    let statusRilis = data.pengaturan?.umum?.status_rilis || 'Sembunyi';
-    prosesDanTampilkanData(inputNis, santriTerpilih.kelas, data.nilai.headers, data.nilai.data, statusRilis, data.pengaturan.detail);
-
-    // MUNCULKAN WIDGET WA
-    const widgetWA = document.getElementById('wa-widget');
-    const waLink = document.getElementById('wa-link');
-    if (widgetWA && waLink) {
-        const pesanDinamis = `Assalamu'alaikum Admin Madrasah Darussalam,\n\nSaya wali santri dari ananda:\n*Nama:* ${santriTerpilih.nama.trim()}\n*Kelas:* ${santriTerpilih.kelas}\n\nIngin meminta bantuan terkait layanan Portal Wali Santri.`;
-        waLink.href = `https://api.whatsapp.com/send/?phone=6285182262514&text=${encodeURIComponent(pesanDinamis)}&type=phone_number&app_absent=0`;
-        widgetWA.classList.remove('hidden');
-        setTimeout(() => widgetWA.classList.remove('opacity-0'), 100);
-    }
-}
-
 // =========================================================
-// FUNGSI PROSES & TAMPILKAN DATA (DIPERBARUI UNTUK REKAP ABSEN)
+// FUNGSI PROSES & TAMPILKAN DATA (DIPERBARUI UNTUK REKAP ABSEN & OPTIMASI RENDER)
 // =========================================================
 function prosesDanTampilkanData(nis, kelas, headers, rows, statusRilis, detailRapor) {
     const containerHasil = document.getElementById('hasilDataOrtu');
     const tbodyNilai = document.getElementById('bodyTabelNilaiOrtu');
-    if(tbodyNilai) tbodyNilai.innerHTML = '';
-
+    
     let barisSantri = undefined;
     if (headers && headers.length > 0) {
         const idxNis = headers.findIndex(h => h && h.toString().toUpperCase().includes('NIS'));
@@ -271,6 +320,7 @@ function prosesDanTampilkanData(nis, kelas, headers, rows, statusRilis, detailRa
 
     let adaNilai = false;
     const dataMapel = JADWAL_MAPEL[kelas] || { tulis: [], praktek: [], baca: [] };
+    let htmlTbody = ''; // OPTIMASI: Menggunakan string sementara untuk rendering agar browser tidak lag
 
     function getBarisHTML(mapel, isGrouped, nomor = '') {
         const skor = dataMap[mapel.toLowerCase()] || '-';
@@ -300,18 +350,18 @@ function prosesDanTampilkanData(nis, kelas, headers, rows, statusRilis, detailRa
         if (!kelas.includes('TK') && (dataMapel.tulis.length > 0 || dataMapel.praktek.length > 0 || dataMapel.baca.length > 0)) {
             
             if (dataMapel.tulis && dataMapel.tulis.length > 0) {
-                tbodyNilai.innerHTML += `<tr class="bg-emerald-50/50"><td colspan="3" class="p-2.5 font-bold text-emerald-800 text-xs border-y border-emerald-100 whitespace-nowrap"><i class="fas fa-pen-alt mr-2 text-emerald-600"></i>A. UJIAN TERTULIS</td></tr>`;
-                dataMapel.tulis.forEach((m, index) => { tbodyNilai.innerHTML += getBarisHTML(m, true, index + 1); adaNilai = true; });
+                htmlTbody += `<tr class="bg-emerald-50/50"><td colspan="3" class="p-2.5 font-bold text-emerald-800 text-xs border-y border-emerald-100 whitespace-nowrap"><i class="fas fa-pen-alt mr-2 text-emerald-600"></i>A. UJIAN TERTULIS</td></tr>`;
+                dataMapel.tulis.forEach((m, index) => { htmlTbody += getBarisHTML(m, true, index + 1); adaNilai = true; });
             }
             
             if (dataMapel.praktek && dataMapel.praktek.length > 0) {
-                tbodyNilai.innerHTML += `<tr class="bg-blue-50/50"><td colspan="3" class="p-2.5 font-bold text-blue-800 text-xs border-y border-blue-100 whitespace-nowrap"><i class="fas fa-praying-hands mr-2 text-blue-600"></i>B. UJIAN PRAKTEK</td></tr>`;
-                dataMapel.praktek.forEach((m, index) => { tbodyNilai.innerHTML += getBarisHTML(m, true, index + 1); adaNilai = true; });
+                htmlTbody += `<tr class="bg-blue-50/50"><td colspan="3" class="p-2.5 font-bold text-blue-800 text-xs border-y border-blue-100 whitespace-nowrap"><i class="fas fa-praying-hands mr-2 text-blue-600"></i>B. UJIAN PRAKTEK</td></tr>`;
+                dataMapel.praktek.forEach((m, index) => { htmlTbody += getBarisHTML(m, true, index + 1); adaNilai = true; });
             }
             
             if (dataMapel.baca && dataMapel.baca.length > 0) {
-                tbodyNilai.innerHTML += `<tr class="bg-purple-50/50"><td colspan="3" class="p-2.5 font-bold text-purple-800 text-xs border-y border-purple-100 whitespace-nowrap"><i class="fas fa-book-open mr-2 text-purple-600"></i>C. UJIAN MEMBACA</td></tr>`;
-                dataMapel.baca.forEach((m, index) => { tbodyNilai.innerHTML += getBarisHTML(m, true, index + 1); adaNilai = true; });
+                htmlTbody += `<tr class="bg-purple-50/50"><td colspan="3" class="p-2.5 font-bold text-purple-800 text-xs border-y border-purple-100 whitespace-nowrap"><i class="fas fa-book-open mr-2 text-purple-600"></i>C. UJIAN MEMBACA</td></tr>`;
+                dataMapel.baca.forEach((m, index) => { htmlTbody += getBarisHTML(m, true, index + 1); adaNilai = true; });
             }
 
        } else {
@@ -365,7 +415,7 @@ function prosesDanTampilkanData(nis, kelas, headers, rows, statusRilis, detailRa
                     }
                 }
 
-                tbodyNilai.innerHTML += `
+                htmlTbody += `
                     <tr class="hover:bg-gray-50/80 transition-all">
                         <td class="p-3 font-semibold text-gray-700 uppercase text-xs pl-4 whitespace-nowrap">
                             <span class="text-gray-500 mr-2 font-bold inline-block w-4 text-right">${noUrutTK}.</span>${item.namaMapel}
@@ -385,7 +435,7 @@ function prosesDanTampilkanData(nis, kelas, headers, rows, statusRilis, detailRa
         }
 
         if (!adaNilai) {
-            tbodyNilai.innerHTML = '<tr><td colspan="3" class="p-4 text-center text-gray-400">Belum ada komponen mapel terinput.</td></tr>';
+            htmlTbody = '<tr><td colspan="3" class="p-4 text-center text-gray-400">Belum ada komponen mapel terinput.</td></tr>';
             const footerTabel = document.getElementById('footerTabelNilaiOrtu');
             if (footerTabel) footerTabel.classList.add('hidden');
         } else {
@@ -480,6 +530,9 @@ function prosesDanTampilkanData(nis, kelas, headers, rows, statusRilis, detailRa
             if(document.getElementById('ortuRanking')) document.getElementById('ortuRanking').innerText = rank;
             if(document.getElementById('ortuJumlahSantri')) document.getElementById('ortuJumlahSantri').innerText = jmlSantri;
         }
+
+        // OPTIMASI: Injeksi DOM dilakukan HANYA satu kali di sini
+        tbodyNilai.innerHTML = htmlTbody;
     }
 
     containerHasil.classList.remove('hidden');
@@ -489,57 +542,80 @@ function formatRp(angka) {
     return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(angka);
 }
 
-function renderSppDariData(dataSpp, settingSpp) {
+function muatRiwayatSpp(nisSantri) {
     const wadah = document.getElementById('wadahSppOrtu');
     const elTagihan = document.getElementById('ortuTagihanSpp');
     const elSisa = document.getElementById('ortuSisaSpp');
     
     if (!wadah) return;
-    wadah.innerHTML = ''; 
+
+    wadah.innerHTML = '<div class="text-center text-xs text-gray-400 py-4"><i class="fas fa-spinner fa-spin mr-1"></i> Memuat data...</div>';
+    if (elTagihan) elTagihan.innerText = '-';
+    if (elSisa) elSisa.innerText = '-';
     
-    let totalTagihan = 0;
-    if (settingSpp) {
-        let nominal = parseFloat(settingSpp.nominal) || 0;
-        let bulan = parseFloat(settingSpp.bulan) || 0;
-        totalTagihan = nominal * bulan;
-    }
+    const fdSpp = new URLSearchParams();
+    fdSpp.append('action', 'getSppSantri');
+    fdSpp.append('nis', nisSantri);
 
-    let totalTerbayar = 0;
+    const fdSetting = new URLSearchParams();
+    fdSetting.append('action', 'getSettingSpp');
 
-    if (dataSpp && dataSpp.length > 0) {
-        dataSpp.forEach(item => {
-            let nom = parseFloat(item.nominal) || 0;
-            totalTerbayar += nom;
-
-            let warnaTeks = item.status === 'LUNAS' ? 'text-emerald-600' : 'text-amber-600';
-            let warnaBg = item.status === 'LUNAS' ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100';
-
-            wadah.innerHTML += `
-                <div class="flex justify-between items-center p-2.5 rounded-lg border text-xs ${warnaBg} mb-2 shadow-sm">
-                    <div>
-                        <span class="font-bold text-gray-700 block mb-0.5">${item.keterangan}</span>
-                        <span class="font-semibold text-blue-600">${formatRp(nom)}</span>
-                    </div>
-                    <span class="font-bold px-2 py-1 bg-white rounded-md ${warnaTeks} border shadow-sm">${item.status}</span>
-                </div>
-            `;
-        });
-    } else {
-        wadah.innerHTML = `<div class="text-center text-xs text-gray-400 py-4 italic">Belum ada riwayat pembayaran yang tercatat.</div>`;
-    }
-
-    let sisaTunggakan = Math.max(0, totalTagihan - totalTerbayar);
-    
-    if (elTagihan) elTagihan.innerText = formatRp(totalTagihan);
-    if (elSisa) {
-        if (sisaTunggakan === 0) {
-            elSisa.innerHTML = '<i class="fas fa-check-circle mr-1"></i> LUNAS';
-            elSisa.className = "text-sm font-black text-emerald-600";
-        } else {
-            elSisa.innerText = formatRp(sisaTunggakan);
-            elSisa.className = "text-sm font-black text-red-500";
+    Promise.all([
+        fetch(GAS_URL, { method: 'POST', body: fdSpp }).then(r => r.json()),
+        fetch(GAS_URL, { method: 'POST', body: fdSetting }).then(r => r.json())
+    ])
+    .then(([resSpp, resSetting]) => {
+        let totalTagihan = 0;
+        if (resSetting && resSetting.status === 'success') {
+            let nominal = parseFloat(resSetting.nominal) || 0;
+            let bulan = parseFloat(resSetting.bulan) || 0;
+            totalTagihan = nominal * bulan;
         }
-    }
+
+        let totalTerbayar = 0;
+        let htmlSpp = ''; // OPTIMASI: Variabel string pengumpul data
+
+        if (resSpp.status === 'success' && resSpp.data.length > 0) {
+            resSpp.data.forEach(item => {
+                let nom = parseFloat(item.nominal) || 0;
+                totalTerbayar += nom;
+
+                let warnaTeks = item.status === 'LUNAS' ? 'text-emerald-600' : 'text-amber-600';
+                let warnaBg = item.status === 'LUNAS' ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100';
+
+                htmlSpp += `
+                    <div class="flex justify-between items-center p-2.5 rounded-lg border text-xs ${warnaBg} mb-2 shadow-sm">
+                        <div>
+                            <span class="font-bold text-gray-700 block mb-0.5">${item.keterangan}</span>
+                            <span class="font-semibold text-blue-600">${formatRp(nom)}</span>
+                        </div>
+                        <span class="font-bold px-2 py-1 bg-white rounded-md ${warnaTeks} border shadow-sm">${item.status}</span>
+                    </div>
+                `;
+            });
+        } else {
+            htmlSpp = `<div class="text-center text-xs text-gray-400 py-4 italic">Belum ada riwayat pembayaran yang tercatat.</div>`;
+        }
+
+        // OPTIMASI: Injeksi data ke HTML sekali saja
+        wadah.innerHTML = htmlSpp;
+
+        let sisaTunggakan = Math.max(0, totalTagihan - totalTerbayar);
+        
+        if (elTagihan) elTagihan.innerText = formatRp(totalTagihan);
+        if (elSisa) {
+            if (sisaTunggakan === 0) {
+                elSisa.innerHTML = '<i class="fas fa-check-circle mr-1"></i> LUNAS';
+                elSisa.className = "text-sm font-black text-emerald-600";
+            } else {
+                elSisa.innerText = formatRp(sisaTunggakan);
+                elSisa.className = "text-sm font-black text-red-500";
+            }
+        }
+    }).catch(e => {
+        wadah.innerHTML = `<div class="text-center text-xs text-red-400 py-4">Gagal terhubung ke database.</div>`;
+        console.error(e);
+    });
 }
 
 
@@ -887,6 +963,9 @@ function terapkanFilterPengumuman() {
 // =======================================================
 // FUNGSI MUAT PENGUMUMAN DARI SERVER
 // =======================================================
+// =======================================================
+// FUNGSI MUAT PENGUMUMAN DARI SERVER
+// =======================================================
 function muatPengumumanPublik() {
     const wadah = document.getElementById('wadahPengumumanPublik');
     if (!wadah) return;
@@ -905,8 +984,8 @@ function muatPengumumanPublik() {
     fetch(GAS_URL, { method: 'POST', body: fdPengumuman })
         .then(response => response.json())
         .then(res => {
-            wadah.innerHTML = ''; 
             let dataServer = (res.status === 'success' && res.data) ? res.data : [];
+            let htmlPengumuman = ''; // OPTIMASI: String penyimpan layout sementara
 
             kategoriTetap.forEach(kat => {
                 let adaPengumuman = dataServer.filter(item => item.kategori && item.kategori.toUpperCase().includes(kat.id.toUpperCase()));
@@ -916,7 +995,7 @@ function muatPengumumanPublik() {
                         const safeTgl = item.tanggal ? item.tanggal.replace(/'/g, "\\'") : "";
                         const safeIsi = item.isi ? item.isi.replace(/'/g, "\\'").replace(/\n/g, "\\n").replace(/\r/g, "") : "";
                         
-                        wadah.innerHTML += `
+                        htmlPengumuman += `
                             <div class="item-pengumuman p-4 bg-white border border-gray-200 rounded-xl flex flex-col sm:flex-row gap-3 shadow-sm relative mb-3" data-kategori="${kat.id}">
                                 <div class="sm:w-36 shrink-0 border-b sm:border-b-0 sm:border-r border-gray-100 pb-2.5 pr-12 sm:pr-3 flex flex-row sm:flex-col justify-between sm:justify-start items-center sm:items-start">
                                     <span class="inline-block px-2 py-0.5 border text-[9px] font-bold rounded mb-0 sm:mb-2 uppercase tracking-wide ${kat.badge}">${item.kategori}</span>
@@ -931,7 +1010,7 @@ function muatPengumumanPublik() {
                         `;
                     });
                } else {
-                    wadah.innerHTML += `
+                    htmlPengumuman += `
                         <div class="item-pengumuman p-4 bg-gray-50 border border-dashed border-gray-300 rounded-xl flex flex-col sm:flex-row gap-3 relative mb-3" data-kategori="${kat.id}">
                             <div class="sm:w-36 shrink-0 border-b sm:border-b-0 sm:border-r border-gray-200 pb-2.5 pr-12 sm:pr-3 flex flex-row sm:flex-col justify-between sm:justify-start items-center sm:items-start">
                                 <span class="inline-block px-2 py-0.5 border text-[9px] font-bold rounded mb-0 sm:mb-2 uppercase tracking-wide ${kat.badge}">${kat.id}</span>
@@ -945,6 +1024,9 @@ function muatPengumumanPublik() {
                     `;
                 }
             });
+            
+            // OPTIMASI: Injeksi data ke dalam DOM hanya dilakukan 1x
+            wadah.innerHTML = htmlPengumuman;
             
             // PENTING: Terapkan ulang filter setelah seluruh elemen selesai di-render
             terapkanFilterPengumuman();
@@ -1198,3 +1280,61 @@ function jalankanJamDigital() {
 
 // Pastikan baris ini ikut ter-copy agar jam otomatis berjalan saat halaman dimuat
 document.addEventListener("DOMContentLoaded", jalankanJamDigital);
+
+
+// =========================================================
+// FITUR AUTO LOGOUT (Sesi Berakhir Otomatis)
+// =========================================================
+let timerAutoLogout;
+const BATAS_WAKTU_LOGOUT = 15 * 60 * 1000; // 15 Menit (dalam milidetik)
+
+function resetTimerLogout() {
+    clearTimeout(timerAutoLogout);
+    
+    // Hanya jalankan perhitungan mundur jika pengguna sedang login (ada NIS di memori)
+    if (localStorage.getItem('ortuActiveNis')) {
+        timerAutoLogout = setTimeout(() => {
+            Swal.fire({
+                title: 'Sesi Berakhir',
+                text: 'Sesi Anda telah berakhir secara otomatis karena tidak ada aktivitas.',
+                icon: 'info',
+                allowOutsideClick: false,
+                confirmButtonColor: '#059669',
+                confirmButtonText: 'Login Kembali',
+                customClass: { popup: 'rounded-2xl', confirmButton: 'rounded-xl' }
+            }).then(() => {
+                // Bersihkan memori secara langsung tanpa perlu konfirmasi ulang
+                localStorage.removeItem('ortuActiveNis');
+                localStorage.removeItem('ortuActiveTgl');
+                localStorage.clear(); 
+
+                if ('caches' in window) {
+                    caches.keys().then((names) => {
+                        for (let name of names) caches.delete(name);
+                    });
+                }
+
+                if ('serviceWorker' in navigator) {
+                    navigator.serviceWorker.getRegistrations().then(function(registrations) {
+                        for(let registration of registrations) registration.unregister();
+                    });
+                }
+                
+                // Refresh halaman untuk kembali ke welcome screen
+                window.location.href = window.location.href.split('?')[0] + '?v=' + new Date().getTime();
+            });
+        }, BATAS_WAKTU_LOGOUT);
+    }
+}
+
+function inisialisasiAutoLogout() {
+    // Deteksi aktivitas pengguna untuk mereset timer
+    window.addEventListener('mousemove', resetTimerLogout);
+    window.addEventListener('mousedown', resetTimerLogout);
+    window.addEventListener('keypress', resetTimerLogout);
+    window.addEventListener('touchstart', resetTimerLogout);
+    window.addEventListener('scroll', resetTimerLogout);
+    
+    // Mulai perhitungan pertama kali
+    resetTimerLogout();
+}
