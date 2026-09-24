@@ -1,23 +1,20 @@
 {
-  "id": "/", 
-  "name": "Portal Wali Santri - Darussalam",
-  "short_name": "Portal Ortu",
-  "description": "Pantau nilai akademik, absensi, dan riwayat SPP santri secara mandiri.",
-  
-  "start_url": "/",
-  "scope": "/",
-  
+  "id": "/presensi/", 
+  "name": "Sistem Presensi Darussalam",
+  "short_name": "Presensi",
+  "description": "Sistem Presensi barcode santri",
+  "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#f8fafc",
-  "theme_color": "#065f46",
+  "theme_color": "#059669",
   "icons": [
     {
-      "src": "asset/logowali.png",
+      "src": "asset/logo-512.png",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "asset/logowali.png",
+      "src": "asset/logo-512.png",
       "sizes": "512x512",
       "type": "image/png"
     }
